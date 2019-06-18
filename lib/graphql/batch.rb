@@ -1,7 +1,4 @@
 require "graphql"
-if Gem::Version.new(GraphQL::VERSION) < Gem::Version.new("1.3")
-  warn "graphql gem versions less than 1.3 are deprecated for use with graphql-batch, upgrade so lazy_resolve can be used"
-end
 require "promise.rb"
 
 module GraphQL
@@ -23,7 +20,18 @@ module GraphQL
       if GraphQL::VERSION >= "1.6.0"
         instrumentation = GraphQL::Batch::SetupMultiplex.new(schema, executor_class: executor_class)
         schema_defn.instrument(:multiplex, instrumentation)
-        schema_defn.instrument(:field, instrumentation)
+        if schema.mutation
+          if Gem::Version.new(GraphQL::VERSION) >= Gem::Version.new('1.9.0.pre3') &&
+              schema.mutation.metadata[:type_class]
+            require_relative "batch/mutation_field_extension"
+            schema.mutation.fields.each do |name, f|
+              field = f.metadata[:type_class]
+              field.extension(GraphQL::Batch::MutationFieldExtension)
+            end
+          else
+            schema_defn.instrument(:field, instrumentation)
+          end
+        end
       else
         instrumentation = GraphQL::Batch::Setup.new(schema, executor_class: executor_class)
         schema_defn.instrument(:query, instrumentation)
@@ -31,15 +39,11 @@ module GraphQL
       end
       schema_defn.lazy_resolve(::Promise, :sync)
     end
-
-    autoload :ExecutionStrategy, 'graphql/batch/execution_strategy'
-    autoload :MutationExecutionStrategy, 'graphql/batch/mutation_execution_strategy'
   end
 end
 
 require_relative "batch/version"
 require_relative "batch/loader"
 require_relative "batch/executor"
-require_relative "batch/promise"
 require_relative "batch/setup"
 require_relative "batch/setup_multiplex"
